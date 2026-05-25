@@ -1,0 +1,29 @@
+dependencies:
+  epdiy:
+    component_hash: bc79a4d681c1b8ce06fb7ad42dbdf22c160779013caf397001ba25638e4b79fd
+    dependencies: []
+    source:
+      git: https://github.com/vroland/epdiy.git
+      path: .
+      type: git
+    version: bdb85cce9fe215db73b9901ba7ff43565bd16e09
+  espressif/led_strip:
+    component_hash: 28621486f77229aaf81c71f5e15d6fbf36c2949cf11094e07090593e659e7639
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 3.0.3
+  idf:
+    source:
+      type: idf
+    version: 5.5.4
+direct_dependencies:
+- epdiy
+- espressif/led_strip
+manifest_hash: f90913dd07d90ecf3528efb9a3f2081e43a17b2e18b56e0f886add061557aa1e
+target: esp32s3
+version: 2.0.0

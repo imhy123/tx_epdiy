@@ -1,0 +1,4 @@
+dependencies:
+  espressif/led_strip: "^3.0.0"
+  epdiy:
+    git: https://github.com/vroland/epdiy.git
