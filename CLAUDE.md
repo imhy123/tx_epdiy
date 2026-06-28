@@ -14,9 +14,9 @@ An e-paper photo frame based on ESP32-S3 + the [epdiy](https://github.com/vrolan
 
 ## Development Environment / 开发环境
 
-- **IDF version / IDF 版本**: v5.5.4 — pinned; epdiy does not yet support IDF v6.x / 固定版本，epdiy 尚不支持 IDF v6.x
-- **Target chip / 目标芯片**: ESP32-S3
-- **IDF path / IDF 路径**: `~/.espressif/v5.5.4/esp-idf` (see `.vscode/settings.json`)
+- **IDF version / IDF 版本**: v6.0.1 — epdiy now supports IDF v6.x / epdiy 已支持 IDF v6.x（之前固定在 v5.5.4 是因为旧版 epdiy 不支持 v6）
+- **Target chip / 目标芯片**: ESP32-S3 (N16R8: 16 MB flash, 8 MB Octal PSRAM)
+- **Activate IDF in a shell / 在 shell 中激活 IDF**: `source /Users/heyong/.espressif/tools/activate_idf_v6.0.1.sh` (needed before using `idf.py` directly / 直接使用 `idf.py` 前需先执行)
 - **Toolchain / 工具链**: xtensa-esp-elf (`~/.espressif/tools/`)
 
 ---
@@ -51,26 +51,39 @@ idf.py fullclean
 
 ```
 main/
-  epdiy_main.c          # Main logic (still contains blink demo code pending cleanup)
-                        # 主业务逻辑（仍混有 blink demo 代码待清理）
-  blink_example_main.c  # Original blink demo — to be deleted / 原始 blink demo，待删除
-  Kconfig.projbuild     # "Example Configuration" menu in menuconfig (blink leftover)
-                        # menuconfig 配置菜单（blink 遗留）
-  idf_component.yml     # Component dependency declaration / 组件依赖声明
+  epdiy_main.c          # Main logic: idf_setup()/idf_loop() run the epdiy demo
+                        # 主业务逻辑：idf_setup()/idf_loop() 跑 epdiy demo
+  Kconfig.projbuild     # "Photo Frame Configuration" menu: e-paper display model
+                        # menuconfig 配置菜单：墨水屏型号选择（默认 ES108FC）
+  idf_component.yml     # Component dependency: epdiy fork (see note below)
+                        # 组件依赖：epdiy fork（见下方说明）
   firasans_*.h          # Generated font arrays — skip when reading code
                         # 工具生成的字体数组，读代码时可跳过
   img_*.h               # Generated image arrays — skip when reading code
                         # 工具生成的图片数组，读代码时可跳过
+partitions/
+  esp32s3_n16r8.csv     # Partition table: 3 MB app + ~12.9 MB spiffs storage
+                        # 分区表：3MB app + ~12.9MB spiffs 存储
 managed_components/
-  epdiy/                # epdiy driver (from git, pinned to a specific commit)
-                        # epdiy 驱动（来自 git，锁定到特定 commit）
-  espressif__led_strip/ # LED strip driver (blink demo leftover dependency)
-                        # LED strip 驱动（blink demo 遗留依赖）
-sdkconfig               # Current build config (target: esp32s3)
-sdkconfig.defaults.esp32s3  # ESP32-S3 config overrides / ESP32-S3 默认配置覆盖
-dependencies.lock       # Locks epdiy commit hash for reproducible builds
-                        # 锁定 epdiy commit hash，保证可重现构建
+  epdiy/                # epdiy driver — fetched from our fork (imhy123/epdiy,
+                        # branch feature/disable_pca9555_tps65185)
+                        # epdiy 驱动（来自我们的 fork）
+sdkconfig.defaults          # Common defaults: flash size, partition table / 通用默认配置
+sdkconfig.defaults.esp32s3  # S3-specific: octal PSRAM + 64 KB/64 B data cache
+                            # S3 专属：八线 PSRAM + 64KB/64B 数据 cache
 ```
+
+**epdiy fork / epdiy 分支**: this board has no PCA9555 IO expander and no
+software-controlled TPS65185 (power via GPIO46, VCOM via potentiometer), and the
+generic 17 MHz bus speed overruns it. The board-level fixes (gate PCA9555/TPS
+behind `EPD_BOARD_V7_DISABLE_IO_EXPANDER`, drive GPIO46 power-enable) live in the
+fork `https://github.com/imhy123/epdiy.git` @ `feature/disable_pca9555_tps65185`;
+panel/bus_speed live in `epdiy_main.c`. The manifest-level `overrides:` field is
+NOT supported by the bundled component manager, so `idf_component.yml` points the
+`epdiy` dependency straight at the fork. After pushing a new fork commit, delete
+`dependencies.lock` + `managed_components/epdiy` to force a re-fetch.
+本板无 PCA9555、TPS65185 不受软件控制（GPIO46 控电源、电位器控 VCOM）；板级修改在 fork 里，
+面板/总线速度在 epdiy_main.c。组件管理器不支持 overrides，故直接用 git 依赖指向 fork。
 
 ---
 
@@ -116,14 +129,19 @@ const EpdDisplay_t ES108FC = {
 
 ## Current Code Status / 当前代码状态
 
-`epdiy_main.c` contains two mixed layers that need cleanup / `epdiy_main.c` 混有两套逻辑待清理：
+Blink demo code is fully removed. `epdiy_main.c` runs the epdiy demo: `app_main()`
+calls `idf_setup()` then loops `idf_loop()` (loading bar → sample images → deep
+sleep). The display now refreshes correctly on the custom V7 board.
 
-1. **epdiy demo code / epdiy 演示代码**: `idf_setup()` + `idf_loop()` — the starting point for real features / 正式功能的起点
-2. **Blink demo leftovers / blink demo 遗留**: LED blink logic in `app_main()`, plus `blink_example_main.c` and the blink menu in `Kconfig.projbuild` — to be deleted / 待删除
+blink 代码已全部移除。`epdiy_main.c` 现在跑 epdiy demo：`app_main()` 调用
+`idf_setup()` 后循环 `idf_loop()`（加载条 → 示例图片 → 休眠），屏幕已能正常刷新。
 
-Next step: remove all blink code, rewrite `app_main()` to call `idf_setup()` and `idf_loop()`, then split out clock / calendar / photo / to-do modules.
+Next step / 下一步: split out clock / calendar / photo / to-do modules — each module
+draws into the framebuffer; the main loop wraps refreshes with
+`epd_poweron()`/`epd_poweroff()`. / 逐步拆分 时钟/日历/照片/待办 模块。
 
-下一步：删除所有 blink 相关代码，将 `app_main()` 改为调用 `idf_setup()` 和 `idf_loop()`，再逐步拆分各功能模块。
+Known issue / 已知问题: a faint black vertical line on the left edge (deferred —
+likely `line_front_porch` edge timing). / 屏幕左边一条淡黑竖线（暂缓，疑似 line_front_porch 边缘时序）。
 
 ---
 

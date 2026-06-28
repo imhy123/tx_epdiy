@@ -1,4 +1,10 @@
 dependencies:
-  espressif/led_strip: "^3.0.0"
+  # Our fork of epdiy: compiles out the PCA9555 IO expander and TPS65185 software
+  # power control for this custom V7-schematic board that has neither (power is
+  # brought up in hardware, VCOM via the onboard potentiometer).
+  # NOTE: the manifest-level `overrides:` field is NOT supported by the component
+  # manager bundled with IDF (3.0.2 on v6.0.1 / 2.4.10 on v5.5.4), so we point the
+  # direct dependency straight at the fork instead.
   epdiy:
-    git: https://github.com/vroland/epdiy.git
+    git: https://github.com/imhy123/epdiy.git
+    version: feature/disable_pca9555_tps65185

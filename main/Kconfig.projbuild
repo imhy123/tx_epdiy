@@ -1,49 +1,30 @@
-menu "Example Configuration"
+menu "Photo Frame Configuration"
 
-    orsource "$IDF_PATH/examples/common_components/env_caps/$IDF_TARGET/Kconfig.env_caps"
-
-    choice BLINK_LED
-        prompt "Blink LED type"
-        default BLINK_LED_GPIO
+    choice EPDIY_DISPLAY
+        prompt "E-paper display model"
+        default EPDIY_DISPLAY_ES108FC2
         help
-            Select the LED type. A normal level controlled LED or an addressable LED strip.
-            The default selection is based on the Espressif DevKit boards.
-            You can change the default selection according to your board.
+            Select the e-paper panel connected to the epdiy board.
+            The choice maps to an EpdDisplay_t definition in epdiy_main.c
+            (resolution, bus width/speed and default waveform).
 
-        config BLINK_LED_GPIO
-            bool "GPIO"
-        config BLINK_LED_STRIP
-            bool "LED strip"
+        config EPDIY_DISPLAY_ES108FC2
+            bool "ES108FC2 — 1920x1080, 16-bit (project default)"
+
+        config EPDIY_DISPLAY_ES108FC
+            bool "ES108FC — 1920x1080"
+
+        config EPDIY_DISPLAY_ES080FC
+            bool "ES080FC — 1800x600, 16-bit"
+
+        config EPDIY_DISPLAY_ES120
+            bool "ES120 — 2560x1600, 16-bit"
+
+        config EPDIY_DISPLAY_ED060KD1
+            bool "ED060KD1 — 1448x1072, 8-bit"
+
+        config EPDIY_DISPLAY_EC080SC2
+            bool "EC080SC2 — 1800x800, 16-bit"
     endchoice
-
-    choice BLINK_LED_STRIP_BACKEND
-        depends on BLINK_LED_STRIP
-        prompt "LED strip backend peripheral"
-        default BLINK_LED_STRIP_BACKEND_RMT if SOC_RMT_SUPPORTED
-        default BLINK_LED_STRIP_BACKEND_SPI
-        help
-            Select the backend peripheral to drive the LED strip.
-
-        config BLINK_LED_STRIP_BACKEND_RMT
-            depends on SOC_RMT_SUPPORTED
-            bool "RMT"
-        config BLINK_LED_STRIP_BACKEND_SPI
-            bool "SPI"
-    endchoice
-
-    config BLINK_GPIO
-        int "Blink GPIO number"
-        range ENV_GPIO_RANGE_MIN ENV_GPIO_OUT_RANGE_MAX
-        default 8
-        help
-            GPIO number (IOxx) to blink on and off the LED.
-            Some GPIOs are used for other purposes (flash connections, etc.) and cannot be used to blink.
-
-    config BLINK_PERIOD
-        int "Blink period in ms"
-        range 10 3600000
-        default 1000
-        help
-            Define the blinking period in milliseconds.
 
 endmenu

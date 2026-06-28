@@ -1,21 +1,25 @@
-/* Blink Example
+/* epdiy demo for ESP32-S3 (pure ESP-IDF).
+ *
+ * Renders the upstream epdiy "Demo" flow: a loading screen with an animated
+ * progress bar, a couple of sample images, a feature list, then deep sleep.
+ * This is the starting point for the photo-frame features (clock / calendar /
+ * photo / to-do) — see CLAUDE.md.
+ */
 
-   This example code is in the Public Domain (or CC0 licensed, at your option.)
-
-   Unless required by applicable law or agreed to in writing, this
-   software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
-   CONDITIONS OF ANY KIND, either express or implied.
-*/
+#include <esp_heap_caps.h>
+#include <esp_log.h>
+#include <esp_sleep.h>
+#include <esp_timer.h>
+#include <esp_types.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <inttypes.h>
 #include <stdio.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "driver/gpio.h"
-#include "esp_log.h"
-#include "esp_sleep.h"
-#include "led_strip.h"
-#include "sdkconfig.h"
+#include <string.h>
 
-#include "epdiy.h"
+#include <epdiy.h>
+
+#include "sdkconfig.h"
 
 #include "firasans_12.h"
 #include "firasans_20.h"
@@ -32,8 +36,18 @@
 #define DEMO_BOARD epd_board_v7
 #endif
 
+static const char* TAG = "epdiy";
+
 EpdiyHighlevelState hl;
 
+const EpdDisplay_t ES080FC = {
+    .width = 1800,
+    .height = 600,
+    .bus_width = 16,
+    .bus_speed = 17,
+    .default_waveform = &epdiy_ED097TC2,
+    .display_type = DISPLAY_TYPE_GENERIC,
+};
 const EpdDisplay_t ES108FC = {
     .width = 1920,
     .height = 1080,
@@ -42,11 +56,63 @@ const EpdDisplay_t ES108FC = {
     .default_waveform = &epdiy_ED047TC1,
     .display_type = DISPLAY_TYPE_GENERIC,
 };
+const EpdDisplay_t ES108FC2 = {
+    .width = 1920,
+    .height = 1080,
+    .bus_width = 16,
+    // 11 MHz: the seller's EC080SC2 example uses this on the same V7 16-bit board.
+    // The generic demo's 17 MHz overruns this board's bus/PSRAM feed and causes
+    // "line buffer underrun" / "draw error: 400" on full-frame draws.
+    .bus_speed = 11,
+    .default_waveform = &epdiy_ED047TC1,
+    .display_type = DISPLAY_TYPE_GENERIC,
+};
+const EpdDisplay_t ES120 = {
+    .width = 2560,
+    .height = 1600,
+    .bus_width = 16,
+    .bus_speed = 12,
+    .default_waveform = &epdiy_ED047TC1,
+    .display_type = DISPLAY_TYPE_GENERIC,
+};
+const EpdDisplay_t ED060KD1 = {
+    .width = 1448,
+    .height = 1072,
+    .bus_width = 8,
+    .bus_speed = 20,
+    .default_waveform = &epdiy_ED060SCT,
+    .display_type = DISPLAY_TYPE_GENERIC,
+};
+const EpdDisplay_t EC080SC2 = {
+    .width = 1800,
+    .height = 800,
+    .bus_width = 16,
+    .bus_speed = 11,
+    .default_waveform = &epdiy_ED047TC2,
+    .display_type = DISPLAY_TYPE_GENERIC,
+};
 
+// The active panel is chosen in menuconfig (Photo Frame Configuration ->
+// "E-paper display model"); defaults to ES108FC. See main/Kconfig.projbuild.
+static const EpdDisplay_t* selected_display(void) {
+#if defined(CONFIG_EPDIY_DISPLAY_ES080FC)
+    return &ES080FC;
+#elif defined(CONFIG_EPDIY_DISPLAY_ES120)
+    return &ES120;
+#elif defined(CONFIG_EPDIY_DISPLAY_ED060KD1)
+    return &ED060KD1;
+#elif defined(CONFIG_EPDIY_DISPLAY_EC080SC2)
+    return &EC080SC2;
+#elif defined(CONFIG_EPDIY_DISPLAY_ES108FC)
+    return &ES108FC;
+#else  // CONFIG_EPDIY_DISPLAY_ES108FC2 (default)
+    return &ES108FC2;
+#endif
+}
 
 void idf_setup() {
-    epd_init(&DEMO_BOARD, &ES108FC, EPD_LUT_64K);
-    
+    epd_init(&DEMO_BOARD, selected_display(), EPD_LUT_64K);
+
     // Set VCOM for boards that allow to set this in software (in mV).
     // This will print an error if unsupported. In this case,
     // set VCOM using the hardware potentiometer and delete this line.
@@ -72,7 +138,7 @@ void delay(uint32_t millis) {
 
 static inline void checkError(enum EpdDrawError err) {
     if (err != EPD_DRAW_SUCCESS) {
-        ESP_LOGE("demo", "draw error: %X", err);
+        ESP_LOGE(TAG, "draw error: %X", err);
     }
 }
 
@@ -257,91 +323,10 @@ void idf_loop() {
     esp_deep_sleep_start();
 }
 
-static const char *TAG = "example";
-
-/* Use project configuration menu (idf.py menuconfig) to choose the GPIO to blink,
-   or you can edit the following line and set a number here.
-*/
-#define BLINK_GPIO CONFIG_BLINK_GPIO
-
-static uint8_t s_led_state = 0;
-
-#ifdef CONFIG_BLINK_LED_STRIP
-
-static led_strip_handle_t led_strip;
-
-static void blink_led(void)
-{
-    /* If the addressable LED is enabled */
-    if (s_led_state) {
-        /* Set the LED pixel using RGB from 0 (0%) to 255 (100%) for each color */
-        led_strip_set_pixel(led_strip, 0, 16, 16, 16);
-        /* Refresh the strip to send data */
-        led_strip_refresh(led_strip);
-    } else {
-        /* Set all LED off to clear all pixels */
-        led_strip_clear(led_strip);
-    }
-}
-
-static void configure_led(void)
-{
-    ESP_LOGI(TAG, "Example configured to blink addressable LED!");
-    /* LED strip initialization with the GPIO and pixels number*/
-    led_strip_config_t strip_config = {
-        .strip_gpio_num = BLINK_GPIO,
-        .max_leds = 1, // at least one LED on board
-    };
-#if CONFIG_BLINK_LED_STRIP_BACKEND_RMT
-    led_strip_rmt_config_t rmt_config = {
-        .resolution_hz = 10 * 1000 * 1000, // 10MHz
-        .flags.with_dma = false,
-    };
-    ESP_ERROR_CHECK(led_strip_new_rmt_device(&strip_config, &rmt_config, &led_strip));
-#elif CONFIG_BLINK_LED_STRIP_BACKEND_SPI
-    led_strip_spi_config_t spi_config = {
-        .spi_bus = SPI2_HOST,
-        .flags.with_dma = true,
-    };
-    ESP_ERROR_CHECK(led_strip_new_spi_device(&strip_config, &spi_config, &led_strip));
-#else
-#error "unsupported LED strip backend"
-#endif
-    /* Set all LED off to clear all pixels */
-    led_strip_clear(led_strip);
-}
-
-#elif CONFIG_BLINK_LED_GPIO
-
-static void blink_led(void)
-{
-    /* Set the GPIO level according to the state (LOW or HIGH)*/
-    gpio_set_level(BLINK_GPIO, s_led_state);
-}
-
-static void configure_led(void)
-{
-    ESP_LOGI(TAG, "Example configured to blink GPIO LED!");
-    gpio_reset_pin(BLINK_GPIO);
-    /* Set the GPIO as a push/pull output */
-    gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
-}
-
-#else
-#error "unsupported LED type"
-#endif
-
-void app_main(void)
-{
-
-    /* Configure the peripheral according to the LED type */
-    configure_led();
+void app_main(void) {
+    idf_setup();
 
     while (1) {
-        ESP_LOGI(TAG, "Turning the LED %s!", s_led_state == true ? "ON" : "OFF");
-        blink_led();
-        /* Toggle the LED state */
-        s_led_state = !s_led_state;
-        vTaskDelay(CONFIG_BLINK_PERIOD / portTICK_PERIOD_MS);
+        idf_loop();
     }
 }
