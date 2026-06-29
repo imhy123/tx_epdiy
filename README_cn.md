@@ -1,4 +1,31 @@
+## 编译
+
+### 使用`idf.py`
+
+```shell
+source ${HOME}/.espressif/tools/activate_idf_v6.0.1.sh
+
+idf.py fullclean
+idf.py all
+idf.py flash
+```
+
 ## 开发基础知识
+
+### epdiy相关
+
+#### 字体
+
+epdiy目录(managed_components/epdiy/scripts/)下有字体转换脚本，可以把 TTF 字体转成 epdiy 的 EpdFont 格式头文件，参考文档：[Fonts, Images, Waveforms](https://epdiy.readthedocs.io/en/latest/filegen.html)。
+
+```shell
+./fontconvert.py FiraSans 96 /tmp/FiraSans-Regular.ttf > ../../../main/font/firasans_96.h
+
+# with uv
+uv run --with freetype-py python ./fontconvert.py FiraSans 96 /tmp/FiraSans-Regular.ttf > ../../../main/font/firasans_96.h
+```
+
+生成后记得手动修改头文件最后的`FiraSans`变量名为`FiraSans_96`。
 
 ### Kconfig
 
@@ -59,9 +86,3 @@ config BLINK_LED_STRIP
 | `bool` | `#ifdef CONFIG_XXX` — 判断宏是否存在 |
 | `int` | `CONFIG_BLINK_PERIOD` — 直接读取数值 |
 | `string` | `CONFIG_XXX` — 直接读取字符串 |
-
-## epdiy相关知识
-
-### 字体
-
-epdiy目录(managed_components/epdiy/scripts/)下有字体转换脚本，可以把 TTF 字体转成 epdiy 的 EpdFont 格式头文件。

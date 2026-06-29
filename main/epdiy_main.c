@@ -1,39 +1,34 @@
-/* epdiy demo for ESP32-S3 (pure ESP-IDF).
+/* Minute clock for the epdiy e-paper photo frame (ESP32-S3, pure ESP-IDF).
  *
- * Renders the upstream epdiy "Demo" flow: a loading screen with an animated
- * progress bar, a couple of sample images, a feature list, then deep sleep.
- * This is the starting point for the photo-frame features (clock / calendar /
- * photo / to-do) — see CLAUDE.md.
+ * Shows the current time as HH:MM and refreshes once per minute, aligned to the
+ * minute boundary. Time comes from the system clock, which starts at
+ * 1970-01-01 00:00 on boot — real wall-clock time needs NTP (WiFi) or an RTC,
+ * to be added later. The original epdiy demo is kept as epdiy_demo_main.c.bak.
  */
+
+#include <time.h>
 
 #include <esp_heap_caps.h>
 #include <esp_log.h>
-#include <esp_sleep.h>
-#include <esp_timer.h>
-#include <esp_types.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include <inttypes.h>
 #include <stdio.h>
-#include <string.h>
 
 #include <epdiy.h>
 
 #include "sdkconfig.h"
 
-#include "firasans_12.h"
-#include "firasans_20.h"
-#include "img_beach.h"
-#include "img_board.h"
-#include "img_zebra.h"
+#include "font/firasans_12.h"
+#include "font/firasans_20.h"
+#include "font/firasans_96.h"
 
 #define WAVEFORM EPD_BUILTIN_WAVEFORM
 
 // choose the default demo board depending on the architecture
 #ifdef CONFIG_IDF_TARGET_ESP32
-#define DEMO_BOARD epd_board_v6
+#define TARGET_BOARD epd_board_v6
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
-#define DEMO_BOARD epd_board_v7
+#define TARGET_BOARD epd_board_v7
 #endif
 
 static const char* TAG = "epdiy";
@@ -110,8 +105,14 @@ static const EpdDisplay_t* selected_display(void) {
 #endif
 }
 
+static inline void checkError(enum EpdDrawError err) {
+    if (err != EPD_DRAW_SUCCESS) {
+        ESP_LOGE(TAG, "draw error: %X", err);
+    }
+}
+
 void idf_setup() {
-    epd_init(&DEMO_BOARD, selected_display(), EPD_LUT_64K);
+    epd_init(&TARGET_BOARD, selected_display(), EPD_LUT_64K);
 
     // Set VCOM for boards that allow to set this in software (in mV).
     // This will print an error if unsupported. In this case,
@@ -132,201 +133,64 @@ void idf_setup() {
     heap_caps_print_heap_info(MALLOC_CAP_SPIRAM);
 }
 
-void delay(uint32_t millis) {
-    vTaskDelay(millis / portTICK_PERIOD_MS);
-}
-
-static inline void checkError(enum EpdDrawError err) {
-    if (err != EPD_DRAW_SUCCESS) {
-        ESP_LOGE(TAG, "draw error: %X", err);
-    }
-}
-
-void draw_progress_bar(int x, int y, int width, int percent, uint8_t* fb) {
-    const uint8_t white = 0xFF;
-    const uint8_t black = 0x0;
-
-    EpdRect border = {
-        .x = x,
-        .y = y,
-        .width = width,
-        .height = 20,
-    };
-    epd_fill_rect(border, white, fb);
-    epd_draw_rect(border, black, fb);
-
-    EpdRect bar = {
-        .x = x + 5,
-        .y = y + 5,
-        .width = (width - 10) * percent / 100,
-        .height = 10,
-    };
-
-    epd_fill_rect(bar, black, fb);
-
-    checkError(epd_hl_update_area(&hl, MODE_DU, epd_ambient_temperature(), border));
-}
-
-void idf_loop() {
-    // select the font based on display width
-    const EpdFont* font;
-    if (epd_width() < 1000) {
-        font = &FiraSans_12;
-    } else {
-        font = &FiraSans_20;
-    }
-
-    uint8_t* fb = epd_hl_get_framebuffer(&hl);
-
-    epd_poweron();
-    epd_clear();
-    int temperature = epd_ambient_temperature();
-    epd_poweroff();
-
-    printf("current temperature: %d\n", temperature);
-
-    epd_fill_circle(30, 30, 15, 0, fb);
-    int cursor_x = epd_rotated_display_width() / 2;
-    int cursor_y = epd_rotated_display_height() / 2 - 100;
-
-    EpdFontProperties font_props = epd_font_properties_default();
-    font_props.flags = EPD_DRAW_ALIGN_CENTER;
-
-    char srotation[32];
-    sprintf(srotation, "Loading demo...\nRotation: %d", epd_get_rotation());
-
-    epd_write_string(font, srotation, &cursor_x, &cursor_y, fb, &font_props);
-
-    int bar_x = epd_rotated_display_width() / 2 - 200;
-    int bar_y = epd_rotated_display_height() / 2;
-
-    epd_poweron();
-    checkError(epd_hl_update_screen(&hl, MODE_GL16, temperature));
-    epd_poweroff();
-
-    for (int i = 0; i < 6; i++) {
-        epd_poweron();
-        draw_progress_bar(bar_x, bar_y, 400, i * 10, fb);
-        epd_poweroff();
-    }
-
-    cursor_x = epd_rotated_display_width() / 2;
-    cursor_y = epd_rotated_display_height() / 2 + 100;
-
-    epd_write_string(
-        font, "Just kidding,\n this is a demo animation 😉", &cursor_x, &cursor_y, fb, &font_props
-    );
-    epd_poweron();
-    checkError(epd_hl_update_screen(&hl, MODE_GL16, temperature));
-    epd_poweroff();
-
-    for (int i = 0; i < 6; i++) {
-        epd_poweron();
-        draw_progress_bar(bar_x, bar_y, 400, 50 - i * 10, fb);
-        epd_poweroff();
-        vTaskDelay(1);
-    }
-
-    cursor_y = epd_rotated_display_height() / 2 + 200;
-    cursor_x = epd_rotated_display_width() / 2;
-
-    EpdRect clear_area = {
-        .x = 0,
-        .y = epd_rotated_display_height() / 2 + 100,
-        .width = epd_rotated_display_width(),
-        .height = 300,
-    };
-
-    epd_fill_rect(clear_area, 0xFF, fb);
-
-    epd_write_string(
-        font, "Now let's look at some pictures.", &cursor_x, &cursor_y, fb, &font_props
-    );
-    epd_poweron();
-    checkError(epd_hl_update_screen(&hl, MODE_GL16, temperature));
-    epd_poweroff();
-
-    delay(1000);
-
-    epd_hl_set_all_white(&hl);
-
-    EpdRect zebra_area = {
-        .x = epd_rotated_display_width() / 2 - img_zebra_width / 2,
-        .y = epd_rotated_display_height() / 2 - img_zebra_height / 2,
-        .width = img_zebra_width,
-        .height = img_zebra_height,
-    };
-
-    epd_draw_rotated_image(zebra_area, img_zebra_data, fb);
-    epd_poweron();
-    checkError(epd_hl_update_screen(&hl, MODE_GC16, temperature));
-    epd_poweroff();
-
-    delay(5000);
-
-    EpdRect board_area = {
-        .x = epd_rotated_display_width() / 2 - img_board_width / 2,
-        .y = epd_rotated_display_height() / 2 - img_board_height / 2,
-        .width = img_board_width,
-        .height = img_board_height,
-    };
-
-    epd_draw_rotated_image(board_area, img_board_data, fb);
-    cursor_x = epd_rotated_display_width() / 2;
-    cursor_y = board_area.y;
-    font_props.flags |= EPD_DRAW_BACKGROUND;
-    epd_write_string(font, "↓ Thats the V2 board. ↓", &cursor_x, &cursor_y, fb, &font_props);
-
-    epd_poweron();
-    checkError(epd_hl_update_screen(&hl, MODE_GC16, temperature));
-    epd_poweroff();
-
-    delay(5000);
-    epd_hl_set_all_white(&hl);
-
-    EpdRect border_rect = {
-        .x = 20,
-        .y = 20,
-        .width = epd_rotated_display_width() - 40,
-        .height = epd_rotated_display_height() - 40};
-    epd_draw_rect(border_rect, 0, fb);
-
-    cursor_x = 50;
-    cursor_y = 100;
-
-    epd_write_default(
-        font,
-        "➸ 16 color grayscale\n"
-        "➸ ~250ms - 1700ms for full frame draw 🚀\n"
-        "➸ Use with 6\" or 9.7\" EPDs\n"
-        "➸ High-quality font rendering ✎🙋\n"
-        "➸ Partial update\n"
-        "➸ Arbitrary transitions with vendor waveforms",
-        &cursor_x, &cursor_y, fb
-    );
-
-    EpdRect img_beach_area = {
-        .x = 0,
-        .y = epd_rotated_display_height() - img_beach_height,
-        .width = img_beach_width,
-        .height = img_beach_height,
-    };
-
-    epd_draw_rotated_image(img_beach_area, img_beach_data, fb);
-
-    epd_poweron();
-    checkError(epd_hl_update_screen(&hl, MODE_GC16, temperature));
-    epd_poweroff();
-
-    printf("going to sleep...\n");
-    epd_deinit();
-    esp_deep_sleep_start();
+// Pick a font that suits the panel width
+static const EpdFont* clock_font(void) {
+    return epd_width() < 1000 ? &FiraSans_20 : &FiraSans_96;
 }
 
 void app_main(void) {
     idf_setup();
 
+    // Start from a clean white screen and keep epdiy's framebuffer in sync.
+    epd_poweron();
+    epd_clear();
+    epd_poweroff();
+    epd_hl_set_all_white(&hl);
+
+    const int w = epd_rotated_display_width();
+    const int h = epd_rotated_display_height();
+
+    // Region we repaint each minute (kept generous so the time always fits).
+    EpdRect clock_area = {
+        .x = w / 2 - 300,
+        .y = h / 2 - 80,
+        .width = 600,
+        .height = 160,
+    };
+
     while (1) {
-        idf_loop();
+        time_t now = time(NULL);
+        struct tm tm_now;
+        localtime_r(&now, &tm_now);
+
+        char hhmm[8];
+        snprintf(hhmm, sizeof(hhmm), "%02d:%02d", tm_now.tm_hour, tm_now.tm_min);
+
+        uint8_t* fb = epd_hl_get_framebuffer(&hl);
+        epd_fill_rect(clock_area, 0xFF, fb);  // clear the clock area to white
+
+        EpdFontProperties props = epd_font_properties_default();
+        props.flags = EPD_DRAW_ALIGN_CENTER;
+        int cursor_x = w / 2;
+        int cursor_y = h / 2 + 10;  // rough vertical centering for a single line
+        epd_write_string(clock_font(), hhmm, &cursor_x, &cursor_y, fb, &props);
+
+        epd_poweron();
+        int temperature = epd_ambient_temperature();
+        // Repaint just the clock area each minute (no full-screen flash); do a
+        // flashing full refresh on the hour to clear any accumulated ghosting.
+        if (tm_now.tm_min == 0) {
+            checkError(epd_hl_update_screen(&hl, MODE_GC16, temperature));
+        } else {
+            checkError(epd_hl_update_area(&hl, MODE_GL16, temperature, clock_area));
+        }
+        epd_poweroff();
+
+        ESP_LOGI(TAG, "clock %s (temp %d)", hhmm, temperature);
+
+        // Sleep until the start of the next minute.
+        now = time(NULL);
+        int secs_to_next_minute = 60 - (int)(now % 60);
+        vTaskDelay(pdMS_TO_TICKS(secs_to_next_minute * 1000));
     }
 }

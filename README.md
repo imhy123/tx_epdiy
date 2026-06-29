@@ -1,69 +1,112 @@
-| Supported Targets | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-H2 | ESP32-H21 | ESP32-P4 | ESP32-S2 | ESP32-S3 |
-| ----------------- | ----- | -------- | -------- | -------- | -------- | --------- | -------- | --------- | -------- | -------- | -------- |
+# tx_epdiy
 
-# Blink Example
+An e-paper photo frame based on ESP32-S3 + the [epdiy](https://github.com/vroland/epdiy)
+open-source e-ink driver. Planned features: clock, calendar, photo display, and to-do list.
 
-(See the README.md file in the upper level 'examples' directory for more information about examples.)
+> 中文版见 [README_cn.md](README_cn.md).
 
-This example demonstrates how to blink a LED by using the GPIO driver or using the [led_strip](https://components.espressif.com/component/espressif/led_strip) library if the LED is addressable e.g. [WS2812](https://cdn-shop.adafruit.com/datasheets/WS2812B.pdf). The `led_strip` library is installed via [component manager](main/idf_component.yml).
+## Build
 
-## How to Use Example
+### Using `idf.py`
 
-Before project configuration and build, be sure to set the correct chip target using `idf.py set-target <chip_name>`.
+```shell
+source ${HOME}/.espressif/tools/activate_idf_v6.0.1.sh
 
-### Hardware Required
-
-* A development board with normal LED or addressable LED on-board (e.g., ESP32-S3-DevKitC, ESP32-C6-DevKitC etc.)
-* A USB cable for Power supply and programming
-
-See [Development Boards](https://www.espressif.com/en/products/devkits) for more information about it.
-
-### Configure the Project
-
-Open the project configuration menu (`idf.py menuconfig`).
-
-In the `Example Configuration` menu:
-
-* Select the LED type in the `Blink LED type` option.
-  * Use `GPIO` for regular LED
-  * Use `LED strip` for addressable LED
-* If the LED type is `LED strip`, select the backend peripheral
-  * `RMT` is only available for ESP targets with RMT peripheral supported
-  * `SPI` is available for all ESP targets
-* Set the GPIO number used for the signal in the `Blink GPIO number` option.
-* Set the blinking period in the `Blink period in ms` option.
-
-### Build and Flash
-
-Run `idf.py -p PORT flash monitor` to build, flash and monitor the project.
-
-(To exit the serial monitor, type ``Ctrl-]``.)
-
-See the [Getting Started Guide](https://docs.espressif.com/projects/esp-idf/en/latest/get-started/index.html) for full steps to configure and use ESP-IDF to build projects.
-
-## Example Output
-
-As you run the example, you will see the LED blinking, according to the previously defined period. For the addressable LED, you can also change the LED color by setting the `led_strip_set_pixel(led_strip, 0, 16, 16, 16);` (LED Strip, Pixel Number, Red, Green, Blue) with values from 0 to 255 in the [source file](main/blink_example_main.c).
-
-```text
-I (315) example: Example configured to blink addressable LED!
-I (325) example: Turning the LED OFF!
-I (1325) example: Turning the LED ON!
-I (2325) example: Turning the LED OFF!
-I (3325) example: Turning the LED ON!
-I (4325) example: Turning the LED OFF!
-I (5325) example: Turning the LED ON!
-I (6325) example: Turning the LED OFF!
-I (7325) example: Turning the LED ON!
-I (8325) example: Turning the LED OFF!
+idf.py fullclean
+idf.py all
+idf.py flash
 ```
 
-Note: The color order could be different according to the LED model.
+## Development Notes
 
-The pixel number indicates the pixel position in the LED strip. For a single LED, use 0.
+### epdiy
 
-## Troubleshooting
+#### Fonts
 
-* If the LED isn't blinking, check the GPIO or the LED type selection in the `Example Configuration` menu.
+The epdiy directory (`managed_components/epdiy/scripts/`) ships a font-conversion
+script that turns a TTF font into an epdiy `EpdFont` header. See
+[Fonts, Images, Waveforms](https://epdiy.readthedocs.io/en/latest/filegen.html).
 
-For any technical queries, please open an [issue](https://github.com/espressif/esp-idf/issues) on GitHub. We will get back to you soon.
+```shell
+./fontconvert.py FiraSans 96 /tmp/FiraSans-Regular.ttf > ../../../main/font/firasans_96.h
+
+# with uv
+uv run --with freetype-py python ./fontconvert.py FiraSans 96 /tmp/FiraSans-Regular.ttf > ../../../main/font/firasans_96.h
+```
+
+After generating, remember to manually rename the trailing `FiraSans` variable in
+the header to `FiraSans_96`.
+
+### Kconfig
+
+**What is Kconfig?**
+
+Kconfig is the build-configuration system that originated in the Linux kernel;
+ESP-IDF adopts it directly. The text-menu interface opened by `idf.py menuconfig`
+is driven by Kconfig files. Each component can ship a `Kconfig` file declaring its
+configuration options; the user's choices are written to `sdkconfig`, and the code
+reads them through `CONFIG_XXX` macros.
+
+**`Kconfig.projbuild` vs `Kconfig`**
+
+Menu entries from a regular `Kconfig` file are nested under the component's own
+submenu; the contents of `Kconfig.projbuild` are promoted to the top level of
+menuconfig. So options defined in `main/Kconfig.projbuild` show up directly in the
+top-level menu instead of being buried inside a component submenu.
+
+**What is `orsource`?**
+
+`orsource` is Kconfig's "optional source" directive:
+
+```
+source "path/to/file"   # error if the file does not exist
+orsource "path/to/file" # silently skipped if the file does not exist
+```
+
+For example:
+
+```kconfig
+orsource "$IDF_PATH/examples/common_components/env_caps/$IDF_TARGET/Kconfig.env_caps"
+```
+
+This pulls in the GPIO-range constants (`ENV_GPIO_RANGE_MIN`,
+`ENV_GPIO_OUT_RANGE_MAX`) for the current target chip (`$IDF_TARGET`, e.g.
+`esp32s3`), so a later `config XXX_GPIO` can constrain the valid GPIO range.
+`orsource` is used because not every chip has this file — if it is missing, it is
+simply skipped.
+
+**How are Kconfig options used in C source?**
+
+Take a `bool` option as an example:
+
+```kconfig
+config BLINK_LED_GPIO
+    bool "GPIO"
+config BLINK_LED_STRIP
+    bool "LED strip"
+```
+
+When a `bool` option is selected the macro **exists** (value `1`); when not
+selected the macro **does not exist**, so `#ifdef` is the idiomatic check:
+
+```c
+#ifdef CONFIG_BLINK_LED_STRIP
+    // user selected "LED strip" in menuconfig
+#elif CONFIG_BLINK_LED_GPIO
+    // user selected "GPIO" in menuconfig
+#else
+    #error "unsupported LED type"
+#endif
+```
+
+This is a `choice` (a single-select group): the two bools are mutually exclusive,
+so an `#ifdef / #elif` chain handles every branch, with a trailing `#error` as a
+fallback.
+
+Comparison with other types:
+
+| Type     | Usage |
+|----------|-------|
+| `bool`   | `#ifdef CONFIG_XXX` — test whether the macro exists |
+| `int`    | `CONFIG_BLINK_PERIOD` — read the value directly |
+| `string` | `CONFIG_XXX` — read the string directly |
